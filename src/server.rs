@@ -25,6 +25,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use governor::{Jitter, Quota, RateLimiter};
 use http::header::HeaderMap;
+use http::Uri;
 use hyper::body::to_bytes;
 use hyper::header::ACCEPT;
 use hyper::service::{make_service_fn, service_fn};
@@ -218,7 +219,6 @@ async fn handle_web_request(
                 .body(Body::from("Please use a Nostr client to connect."))
                 .unwrap())
         }
-        // OHTTP server endpoint
         ("/ohttp-keys", false) => {
             let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
@@ -227,6 +227,56 @@ async fn handle_web_request(
                 return Ok(Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::from(ohttp_keys))
+                    .unwrap());
+            }
+
+            Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from(""))
+                .unwrap())
+        }
+        ("/.well-known/ohttp-gateway", false) => {
+            let ohttp_server_config = ohttp_server_config.clone();
+            if let Some(ohttp_server_config) = ohttp_server_config {
+                let req_body = to_bytes(request.into_body()).await.unwrap();
+                let (bhttp_req, server_response) =
+                    ohttp_server_config.server.decapsulate(&req_body).unwrap();
+
+                let mut cursor = std::io::Cursor::new(bhttp_req);
+                let req = bhttp::Message::read_bhttp(&mut cursor).unwrap();
+                let uri = Uri::builder()
+                    .scheme(req.control().scheme().unwrap_or_default())
+                    .authority(req.control().authority().unwrap_or_default())
+                    .path_and_query(req.control().path().unwrap_or_default())
+                    .build()
+                    .unwrap();
+                let body = serde_json::to_string(&req.content()).unwrap();
+                let mut http_req = Request::builder()
+                    .uri(uri)
+                    .method(req.control().method().unwrap_or_default());
+
+                //TODO can we remove this? bhttp message should have no headers
+                for header in req.header().fields() {
+                    http_req = http_req.header(header.name(), header.value())
+                }
+
+                // TODO: figure out how to handle this body as a nostr event
+
+                let event = convert_to_msg(&body, None).unwrap();
+                match event {
+                    NostrMessage::EventMsg(event) => {
+                        broadcast.send(event.into()).unwrap();
+                    }
+                    // TODO: figure out how to do subscriptions
+                    _ => (),
+                }
+
+                // empty response means ok
+                let res = server_response.encapsulate(&[]).unwrap();
+
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(res))
                     .unwrap());
             }
 
