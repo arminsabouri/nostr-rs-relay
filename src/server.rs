@@ -12,6 +12,8 @@ use crate::event::EventWrapper;
 use crate::info::RelayInfo;
 use crate::nip05;
 use crate::notice::Notice;
+use crate::ohttp::gen_ohttp_server_config;
+use crate::ohttp::ServerKeyConfig;
 use crate::payment;
 use crate::payment::InvoiceInfo;
 use crate::payment::PaymentMessage;
@@ -77,6 +79,7 @@ async fn handle_web_request(
     favicon: Option<Vec<u8>>,
     registry: Registry,
     metrics: NostrMetrics,
+    ohttp_server_config: Option<ServerKeyConfig>,
 ) -> Result<Response<Body>, Infallible> {
     match (
         request.uri().path(),
@@ -213,6 +216,23 @@ async fn handle_web_request(
                 .status(200)
                 .header("Content-Type", "text/plain")
                 .body(Body::from("Please use a Nostr client to connect."))
+                .unwrap())
+        }
+        // OHTTP server endpoint
+        ("/ohttp-keys", false) => {
+            let ohttp_server_config = ohttp_server_config.clone();
+            if let Some(ohttp_server_config) = ohttp_server_config {
+                let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
+
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(ohttp_keys))
+                    .unwrap());
+            }
+
+            Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from(""))
                 .unwrap())
         }
         ("/metrics", false) => {
@@ -819,6 +839,14 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
             info!("NIP-05 domain blacklist: {:?}", bl);
         }
     }
+
+    let ohttp_server_config = if settings.options.enable_ohttp {
+        Some(gen_ohttp_server_config().expect("generate new ohttp server config"))
+    } else {
+        None
+    };
+    info!("OHTTP server config: {:?}", ohttp_server_config);
+
     // configure tokio runtime
     let rt = Builder::new_multi_thread()
         .enable_all()
@@ -975,6 +1003,7 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
             let favicon = favicon.clone();
             let registry = registry.clone();
             let metrics = metrics.clone();
+            let ohttp_server_config = ohttp_server_config.clone();
             async move {
                 // service_fn converts our function into a `Service`
                 Ok::<_, Infallible>(service_fn(move |request: Request<Body>| {
@@ -990,6 +1019,7 @@ pub fn start_server(settings: &Settings, shutdown_rx: MpscReceiver<()>) -> Resul
                         favicon.clone(),
                         registry.clone(),
                         metrics.clone(),
+                        ohttp_server_config.clone(),
                     )
                 }))
             }

@@ -104,6 +104,8 @@ port = 8080
 # from the current time, but the default is to allow any date.
 reject_future_seconds = 1800
 
+enable_ohttp = true
+
 [limits]
 # Limit events created per second, averaged over one minute.  Must be
 # an integer.  If not set (or set to 0), there is no limit.  Note:

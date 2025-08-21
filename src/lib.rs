@@ -10,6 +10,7 @@ pub mod info;
 pub mod nauthz;
 pub mod nip05;
 pub mod notice;
+pub mod ohttp;
 pub mod repo;
 pub mod subscription;
 pub mod utils;
