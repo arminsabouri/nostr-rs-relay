@@ -27,8 +27,13 @@ impl From<ServerKeyConfig> for ohttp::Server {
 /// Generate a new OHTTP server key configuration
 pub fn gen_ohttp_server_config() -> Result<ServerKeyConfig, OhttpError> {
     let ikm = rand::random::<[u8; 32]>();
+    println!(
+        "======= Generating OHTTP config with KEY_ID: {}, KEM: {:?}",
+        KEY_ID, KEM
+    );
     let config =
         ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).map_err(OhttpError::Ohttp)?;
+    println!("======= Generated config: {:?}", config);
     Ok(ServerKeyConfig {
         ikm,
         server: ohttp::Server::new(config).map_err(OhttpError::Ohttp)?,

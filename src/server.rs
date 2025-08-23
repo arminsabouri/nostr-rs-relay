@@ -82,6 +82,8 @@ async fn handle_web_request(
     metrics: NostrMetrics,
     ohttp_server_config: Option<ServerKeyConfig>,
 ) -> Result<Response<Body>, Infallible> {
+    println!("======= handle_web_request");
+    println!("request: {:?}", request.uri().path());
     match (
         request.uri().path(),
         request.headers().contains_key(header::UPGRADE),
@@ -220,6 +222,7 @@ async fn handle_web_request(
                 .unwrap())
         }
         ("/ohttp-keys", false) => {
+            println!("======= ohttp-keys");
             let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
                 let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
@@ -236,11 +239,28 @@ async fn handle_web_request(
                 .unwrap())
         }
         ("/.well-known/ohttp-gateway", false) => {
+            println!("======= .well-known/ohttp-gateway");
             let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
-                let req_body = to_bytes(request.into_body()).await.unwrap();
+                // Read the body as raw bytes to preserve exact client data
+                let mut req_body = Vec::new();
+                let mut body_stream = request.into_body();
+                while let Some(chunk) = body_stream.next().await {
+                    let chunk = chunk.unwrap();
+                    req_body.extend_from_slice(&chunk);
+                }
+
                 let (bhttp_req, server_response) =
-                    ohttp_server_config.server.decapsulate(&req_body).unwrap();
+                    match ohttp_server_config.server.decapsulate(&req_body) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            println!("======= OHTTP decapsulation failed: {:?}", e);
+                            return Ok(Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(Body::from(format!("OHTTP decapsulation failed: {:?}", e)))
+                                .unwrap());
+                        }
+                    };
 
                 let mut cursor = std::io::Cursor::new(bhttp_req);
                 let req = bhttp::Message::read_bhttp(&mut cursor).unwrap();
@@ -250,7 +270,7 @@ async fn handle_web_request(
                     .path_and_query(req.control().path().unwrap_or_default())
                     .build()
                     .unwrap();
-                let body = serde_json::to_string(&req.content()).unwrap();
+                let body = String::from_utf8(req.content().to_vec()).unwrap();
                 let mut http_req = Request::builder()
                     .uri(uri)
                     .method(req.control().method().unwrap_or_default());
@@ -260,12 +280,55 @@ async fn handle_web_request(
                     http_req = http_req.header(header.name(), header.value())
                 }
 
-                // TODO: figure out how to handle this body as a nostr event
-
                 let event = convert_to_msg(&body, None).unwrap();
                 match event {
-                    NostrMessage::EventMsg(event) => {
-                        broadcast.send(event.into()).unwrap();
+                    NostrMessage::EventMsg(ec) => {
+                        let parsed: Result<EventWrapper> = Result::<EventWrapper>::from(ec);
+                        match parsed {
+                            Ok(WrappedEvent(e)) => {
+                                // Create a notice channel for OHTTP responses
+                                let (notice_tx, mut notice_rx) =
+                                    tokio::sync::mpsc::channel::<Notice>(1);
+
+                                let submit_event = SubmittedEvent {
+                                    event: e.clone(),
+                                    notice_tx,
+                                    source_ip: remote_addr.ip().to_string(),
+                                    origin: None,
+                                    user_agent: None,
+                                    auth_pubkey: None,
+                                };
+
+                                // Send to database writer
+                                if let Err(e) = event_tx.send(submit_event).await {
+                                    println!("======= Failed to send event to database: {:?}", e);
+                                }
+
+                                // Wait for processing result and log any notices
+                                if let Some(notice) = notice_rx.recv().await {
+                                    match notice {
+                                        Notice::Message(msg) => {
+                                            println!("======= Event processing message: {}", msg)
+                                        }
+                                        Notice::EventResult(result) => println!(
+                                            "======= Event processing result: {} - {}",
+                                            result.status.prefix(),
+                                            result.msg
+                                        ),
+                                        Notice::AuthChallenge(challenge) => println!(
+                                            "======= Event processing auth challenge: {}",
+                                            challenge
+                                        ),
+                                    }
+                                }
+                            }
+                            Ok(WrappedAuth(_)) => {
+                                println!("======= AUTH event received via OHTTP (not supported)");
+                            }
+                            Err(e) => {
+                                println!("======= Invalid event received via OHTTP: {:?}", e);
+                            }
+                        }
                     }
                     // TODO: figure out how to do subscriptions
                     _ => (),
@@ -1118,6 +1181,7 @@ fn convert_to_msg(msg: &str, max_bytes: Option<usize>) -> Result<NostrMessage> {
             Ok(m)
         }
         Err(e) => {
+            println!("======= proto parse error: {:?}", e);
             trace!("proto parse error: {:?}", e);
             trace!("parse error on message: {:?}", msg.trim());
             Err(Error::ProtoParseError)
