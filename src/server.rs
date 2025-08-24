@@ -330,7 +330,78 @@ async fn handle_web_request(
                             }
                         }
                     }
-                    // TODO: figure out how to do subscriptions
+                    NostrMessage::SubMsg(sub) => {
+                        println!("======= Subscription received via OHTTP: {:?}", sub.id);
+
+                        // Create a channel for query results
+                        let (query_tx, mut query_rx) = mpsc::channel::<db::QueryResult>(1000);
+
+                        // Create a channel to abandon the query if needed
+                        let (abandon_query_tx, abandon_query_rx) = oneshot::channel::<()>();
+
+                        let repo_clone = repo.clone();
+                        let sub_clone = sub.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = repo_clone
+                                .query_subscription(
+                                    sub_clone,
+                                    "ohttp_client".to_string(),
+                                    query_tx,
+                                    abandon_query_rx,
+                                )
+                                .await
+                            {
+                                eprintln!("OHTTP subscription query error: {:?}", e);
+                            }
+                        });
+
+                        // Collect results and build response
+                        let mut events = Vec::new();
+
+                        // Set a timeout for collecting results
+                        let timeout = tokio::time::Duration::from_secs(10);
+
+                        loop {
+                            tokio::select! {
+                                // Receive query results
+                                result = query_rx.recv() => {
+                                    match result {
+                                        Some(query_result) => {
+                                            // Add event to our response
+                                            events.push(query_result.event);
+                                        }
+                                        None => {
+                                            // Channel closed, query finished
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Timeout reached
+                                _ = tokio::time::sleep(timeout) => {
+                                    println!("OHTTP subscription timeout reached");
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Send EOSE message
+                        // let eose_msg = format!("[\"EOSE\",\"{}\"]", sub.id);
+                        // events.push(eose_msg);
+
+                        // Join all events with newlines for the response
+                        let response_data = events.join("\n");
+                        println!("======= response_data: {:?}", response_data);
+
+                        // Encapsulate the response data
+                        let res = server_response
+                            .encapsulate(response_data.as_bytes())
+                            .unwrap();
+
+                        return Ok(Response::builder()
+                            .status(StatusCode::OK)
+                            .body(Body::from(res))
+                            .unwrap());
+                    }
                     _ => (),
                 }
 
