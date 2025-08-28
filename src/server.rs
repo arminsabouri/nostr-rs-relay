@@ -221,6 +221,7 @@ async fn handle_web_request(
                 .body(Body::from("Please use a Nostr client to connect."))
                 .unwrap())
         }
+        // TODO: this is deprecated and should be replaced with GET /.well-known/ohttp-gateway
         ("/ohttp-keys", false) => {
             println!("======= ohttp-keys");
             let ohttp_server_config = ohttp_server_config.clone();
