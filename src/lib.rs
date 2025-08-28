@@ -6,6 +6,7 @@ pub mod db;
 pub mod delegation;
 pub mod error;
 pub mod event;
+mod http;
 pub mod info;
 pub mod nauthz;
 pub mod nip05;

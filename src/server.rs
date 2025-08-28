@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::event::EventCmd;
 use crate::event::EventWrapper;
+use crate::http::handle_request;
 use crate::info::RelayInfo;
 use crate::nip05;
 use crate::notice::Notice;
@@ -271,148 +272,33 @@ async fn handle_web_request(
                     .path_and_query(req.control().path().unwrap_or_default())
                     .build()
                     .unwrap();
-                let body = String::from_utf8(req.content().to_vec()).unwrap();
-                let mut http_req = Request::builder()
+                let mut http_req_builder = Request::builder()
                     .uri(uri)
                     .method(req.control().method().unwrap_or_default());
 
-                //TODO can we remove this? bhttp message should have no headers
                 for header in req.header().fields() {
-                    http_req = http_req.header(header.name(), header.value())
+                    http_req_builder = http_req_builder.header(header.name(), header.value())
                 }
-
-                let event = convert_to_msg(&body, None).unwrap();
-                match event {
-                    NostrMessage::EventMsg(ec) => {
-                        let parsed: Result<EventWrapper> = Result::<EventWrapper>::from(ec);
-                        match parsed {
-                            Ok(WrappedEvent(e)) => {
-                                // Create a notice channel for OHTTP responses
-                                let (notice_tx, mut notice_rx) =
-                                    tokio::sync::mpsc::channel::<Notice>(1);
-
-                                let submit_event = SubmittedEvent {
-                                    event: e.clone(),
-                                    notice_tx,
-                                    source_ip: remote_addr.ip().to_string(),
-                                    origin: None,
-                                    user_agent: None,
-                                    auth_pubkey: None,
-                                };
-
-                                // Send to database writer
-                                if let Err(e) = event_tx.send(submit_event).await {
-                                    println!("======= Failed to send event to database: {:?}", e);
-                                }
-
-                                // Wait for processing result and log any notices
-                                if let Some(notice) = notice_rx.recv().await {
-                                    match notice {
-                                        Notice::Message(msg) => {
-                                            println!("======= Event processing message: {}", msg)
-                                        }
-                                        Notice::EventResult(result) => println!(
-                                            "======= Event processing result: {} - {}",
-                                            result.status.prefix(),
-                                            result.msg
-                                        ),
-                                        Notice::AuthChallenge(challenge) => println!(
-                                            "======= Event processing auth challenge: {}",
-                                            challenge
-                                        ),
-                                    }
-                                }
-                            }
-                            Ok(WrappedAuth(_)) => {
-                                println!("======= AUTH event received via OHTTP (not supported)");
-                            }
-                            Err(e) => {
-                                println!("======= Invalid event received via OHTTP: {:?}", e);
-                            }
-                        }
-                    }
-                    NostrMessage::SubMsg(sub) => {
-                        println!("======= Subscription received via OHTTP: {:?}", sub.id);
-
-                        // Create a channel for query results
-                        let (query_tx, mut query_rx) = mpsc::channel::<db::QueryResult>(1000);
-
-                        // Create a channel to abandon the query if needed
-                        let (abandon_query_tx, abandon_query_rx) = oneshot::channel::<()>();
-
-                        let repo_clone = repo.clone();
-                        let sub_clone = sub.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = repo_clone
-                                .query_subscription(
-                                    sub_clone,
-                                    "ohttp_client".to_string(),
-                                    query_tx,
-                                    abandon_query_rx,
-                                )
-                                .await
-                            {
-                                eprintln!("OHTTP subscription query error: {:?}", e);
-                            }
-                        });
-
-                        // Collect results and build response
-                        let mut events = Vec::new();
-
-                        // Set a timeout for collecting results
-                        let timeout = tokio::time::Duration::from_secs(10);
-
-                        loop {
-                            tokio::select! {
-                                // Receive query results
-                                result = query_rx.recv() => {
-                                    match result {
-                                        Some(query_result) => {
-                                            // Add event to our response
-                                            events.push(query_result.event);
-                                        }
-                                        None => {
-                                            // Channel closed, query finished
-                                            break;
-                                        }
-                                    }
-                                }
-                                // Timeout reached
-                                _ = tokio::time::sleep(timeout) => {
-                                    println!("OHTTP subscription timeout reached");
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Send EOSE message
-                        // let eose_msg = format!("[\"EOSE\",\"{}\"]", sub.id);
-                        // events.push(eose_msg);
-
-                        // Join all events with newlines for the response
-                        let response_data = events.join("\n");
-                        println!("======= response_data: {:?}", response_data);
-
-                        // Encapsulate the response data
-                        let res = server_response
-                            .encapsulate(response_data.as_bytes())
-                            .unwrap();
-
+                // Add the body to the request
+                let http_req = http_req_builder.body(req.content().to_vec()).unwrap();
+                match handle_request(http_req, repo, event_tx).await {
+                    Ok(response) => {
+                        let res = server_response.encapsulate(response.as_bytes()).unwrap();
                         return Ok(Response::builder()
                             .status(StatusCode::OK)
                             .body(Body::from(res))
                             .unwrap());
                     }
-                    _ => (),
+                    Err(e) => {
+                        let res = server_response
+                            .encapsulate(e.to_string().as_bytes())
+                            .unwrap();
+                        return Ok(Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from(res))
+                            .unwrap());
+                    }
                 }
-
-                // empty response means ok
-                let res = server_response.encapsulate(&[]).unwrap();
-
-                return Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from(res))
-                    .unwrap());
             }
 
             Ok(Response::builder()
@@ -1233,7 +1119,7 @@ pub enum NostrMessage {
 }
 
 /// Convert Message to `NostrMessage`
-fn convert_to_msg(msg: &str, max_bytes: Option<usize>) -> Result<NostrMessage> {
+pub(crate) fn convert_to_msg(msg: &str, max_bytes: Option<usize>) -> Result<NostrMessage> {
     let parsed_res: Result<NostrMessage> =
         serde_json::from_str(msg).map_err(std::convert::Into::into);
     match parsed_res {
