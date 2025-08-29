@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use hyper::{Method, Request};
+use hyper::{body::to_bytes, Body, Method, Request};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -14,16 +14,17 @@ use crate::{
 
 // TODO: more granular error handling
 pub(crate) async fn handle_request(
-    request: Request<Vec<u8>>,
+    request: Request<Body>,
     repo: Arc<dyn NostrRepo>,
     event_tx: mpsc::Sender<SubmittedEvent>,
 ) -> Result<String> {
-    let method = request.method();
-    let body = String::from_utf8(request.body().clone())?;
+    let method = request.method().clone();
+    let body = to_bytes(request.into_body()).await?;
+    let body = String::from_utf8(body.to_vec())?;
     let nostr_message = convert_to_msg(&body, None)?;
 
     match method {
-        &Method::GET => {
+        Method::GET => {
             // getting events, expecting a subscription event
             match nostr_message {
                 NostrMessage::SubMsg(sub) => {
@@ -92,7 +93,7 @@ pub(crate) async fn handle_request(
                 }
             }
         }
-        &Method::POST => {
+        Method::POST => {
             // posting an event, expecting an event event
             match nostr_message {
                 NostrMessage::EventMsg(event_command) => {

@@ -241,7 +241,6 @@ async fn handle_web_request(
                 .unwrap())
         }
         ("/.well-known/ohttp-gateway", false) => {
-            println!("======= .well-known/ohttp-gateway");
             let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
                 // Read the body as raw bytes to preserve exact client data
@@ -280,7 +279,7 @@ async fn handle_web_request(
                     http_req_builder = http_req_builder.header(header.name(), header.value())
                 }
                 // Add the body to the request
-                let http_req = http_req_builder.body(req.content().to_vec()).unwrap();
+                let http_req = http_req_builder.body(Body::from(req.content().to_vec())).unwrap();
                 match handle_request(http_req, repo, event_tx).await {
                     Ok(response) => {
                         let res = server_response.encapsulate(response.as_bytes()).unwrap();
@@ -306,6 +305,17 @@ async fn handle_web_request(
                 .body(Body::from(""))
                 .unwrap())
         }
+        ("/rest", false) => {
+            match handle_request(request, repo, event_tx).await {
+            Ok(response) => Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::from(response))
+                .unwrap()),
+            Err(e) => Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(e.to_string()))
+                .unwrap()),
+        }},
         ("/metrics", false) => {
             let mut buffer = vec![];
             let encoder = TextEncoder::new();
