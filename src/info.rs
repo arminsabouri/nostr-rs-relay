@@ -61,6 +61,10 @@ pub struct RelayInfo {
     pub payment_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fees: Option<Fees>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rest_capable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ohttp_capable: Option<bool>,
 }
 
 /// Convert an Info configuration into public Relay Info
@@ -136,6 +140,8 @@ impl From<Settings> for RelayInfo {
             payment_url,
             fees,
             icon: i.relay_icon,
+            rest_capable: Some(c.options.enable_rest),
+            ohttp_capable: Some(c.options.enable_ohttp),
         }
     }
 }
