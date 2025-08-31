@@ -50,6 +50,7 @@ pub struct Network {
 pub struct Options {
     pub reject_future_seconds: Option<usize>, // if defined, reject any events with a timestamp more than X seconds in the future
     pub enable_ohttp: bool,
+    pub enable_rest: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,6 +361,7 @@ impl Default for Settings {
             options: Options {
                 reject_future_seconds: None, // Reject events in the future if defined
                 enable_ohttp: false,
+                enable_rest: false,
             },
             logging: Logging {
                 folder_path: None,

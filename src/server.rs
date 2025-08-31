@@ -83,8 +83,6 @@ async fn handle_web_request(
     metrics: NostrMetrics,
     ohttp_server_config: Option<ServerKeyConfig>,
 ) -> Result<Response<Body>, Infallible> {
-    println!("======= handle_web_request");
-    println!("request: {:?}", request.uri().path());
     match (
         request.uri().path(),
         request.headers().contains_key(header::UPGRADE),
@@ -224,7 +222,6 @@ async fn handle_web_request(
         }
         // TODO: this is deprecated and should be replaced with GET /.well-known/ohttp-gateway
         ("/ohttp-keys", false) => {
-            println!("======= ohttp-keys");
             let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
                 let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
@@ -279,7 +276,9 @@ async fn handle_web_request(
                     http_req_builder = http_req_builder.header(header.name(), header.value())
                 }
                 // Add the body to the request
-                let http_req = http_req_builder.body(Body::from(req.content().to_vec())).unwrap();
+                let http_req = http_req_builder
+                    .body(Body::from(req.content().to_vec()))
+                    .unwrap();
                 match handle_request(http_req, repo, event_tx).await {
                     Ok(response) => {
                         let res = server_response.encapsulate(response.as_bytes()).unwrap();
@@ -306,16 +305,24 @@ async fn handle_web_request(
                 .unwrap())
         }
         ("/rest", false) => {
+            if !settings.options.enable_rest {
+                return Ok(Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from(""))
+                    .unwrap());
+            }
+
             match handle_request(request, repo, event_tx).await {
-            Ok(response) => Ok(Response::builder()
-                .status(StatusCode::OK)
-                .body(Body::from(response))
-                .unwrap()),
-            Err(e) => Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from(e.to_string()))
-                .unwrap()),
-        }},
+                Ok(response) => Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(response))
+                    .unwrap()),
+                Err(e) => Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from(e.to_string()))
+                    .unwrap()),
+            }
+        }
         ("/metrics", false) => {
             let mut buffer = vec![];
             let encoder = TextEncoder::new();
