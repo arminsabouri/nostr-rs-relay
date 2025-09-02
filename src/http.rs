@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use hyper::{body::to_bytes, Body, Method, Request};
@@ -12,6 +12,22 @@ use crate::{
     server::{convert_to_msg, NostrMessage},
 };
 
+fn parse_query_params(query_string: &str) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+
+    if query_string.is_empty() {
+        return params;
+    }
+
+    for pair in query_string.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            params.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    params
+}
+
 // TODO: more granular error handling
 pub(crate) async fn handle_request(
     request: Request<Body>,
@@ -19,22 +35,21 @@ pub(crate) async fn handle_request(
     event_tx: mpsc::Sender<SubmittedEvent>,
 ) -> Result<String> {
     let method = request.method().clone();
-    let body = to_bytes(request.into_body()).await?;
-    let body = String::from_utf8(body.to_vec())?;
-    let nostr_message = convert_to_msg(&body, None)?;
-
     match method {
         Method::GET => {
-            // getting events, expecting a subscription event
+            let query_params = parse_query_params(request.uri().query().unwrap_or_default());
+            let message = query_params
+                .get("message")
+                .ok_or(anyhow::anyhow!("Message not found"))?;
+            let message_string = String::from_utf8(hex::decode(message)?)?;
+            let nostr_message = convert_to_msg(&message_string, None)?;
             match nostr_message {
                 NostrMessage::SubMsg(sub) => {
                     println!("======= Subscription received via OHTTP: {:?}", sub.id);
-
                     // Create a channel for query results
                     let (query_tx, mut query_rx) = mpsc::channel::<db::QueryResult>(1000);
-
                     // Create a channel to abandon the query if needed
-                    let (abandon_query_tx, abandon_query_rx) = oneshot::channel::<()>();
+                    let (_abandon_query_tx, abandon_query_rx) = oneshot::channel::<()>();
 
                     let repo_clone = repo.clone();
                     let sub_clone = sub.clone();
@@ -51,11 +66,7 @@ pub(crate) async fn handle_request(
                             eprintln!("OHTTP subscription query error: {:?}", e);
                         }
                     });
-
-                    // Collect results and build response
                     let mut events = Vec::new();
-
-                    // Set a timeout for collecting results
                     let timeout = tokio::time::Duration::from_secs(10);
 
                     loop {
@@ -94,6 +105,10 @@ pub(crate) async fn handle_request(
             }
         }
         Method::POST => {
+            let body = to_bytes(request.into_body()).await?;
+            let body = String::from_utf8(body.to_vec())?;
+            let nostr_message = convert_to_msg(&body, None)?;
+
             // posting an event, expecting an event event
             match nostr_message {
                 NostrMessage::EventMsg(event_command) => {
