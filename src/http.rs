@@ -39,7 +39,7 @@ pub(crate) async fn handle_request(
         Method::GET => {
             let query_params = parse_query_params(request.uri().query().unwrap_or_default());
             let message = query_params
-                .get("message")
+                .get("filter")
                 .ok_or(anyhow::anyhow!("Message not found"))?;
             let message_string = String::from_utf8(hex::decode(message)?)?;
             let nostr_message = convert_to_msg(&message_string, None)?;
