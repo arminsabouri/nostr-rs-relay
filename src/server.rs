@@ -222,7 +222,6 @@ async fn handle_web_request(
         }
         // TODO: this is deprecated and should be replaced with GET /.well-known/ohttp-gateway
         ("/ohttp-keys", false) => {
-            let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
                 let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
 
@@ -238,7 +237,6 @@ async fn handle_web_request(
                 .unwrap())
         }
         ("/.well-known/ohttp-gateway", false) => {
-            let ohttp_server_config = ohttp_server_config.clone();
             if let Some(ohttp_server_config) = ohttp_server_config {
                 // Read the body as raw bytes to preserve exact client data
                 let mut req_body = Vec::new();

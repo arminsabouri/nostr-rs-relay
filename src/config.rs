@@ -55,6 +55,13 @@ pub struct Options {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(unused)]
+pub struct Ohttp {
+    pub max_request_bytes: usize,
+    pub max_response_bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(unused)]
 pub struct Retention {
     // TODO: implement
     pub max_events: Option<usize>,                // max events
@@ -194,6 +201,7 @@ pub struct Settings {
     pub retention: Retention,
     pub options: Options,
     pub logging: Logging,
+    pub ohttp: Ohttp,
 }
 
 impl Settings {
@@ -366,6 +374,10 @@ impl Default for Settings {
             logging: Logging {
                 folder_path: None,
                 file_prefix: None,
+            },
+            ohttp: Ohttp {
+                max_request_bytes: 65536,
+                max_response_bytes: 65536,
             },
         }
     }

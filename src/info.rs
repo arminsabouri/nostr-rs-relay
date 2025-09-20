@@ -65,6 +65,10 @@ pub struct RelayInfo {
     pub rest_capable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ohttp_capable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ohttp_max_request_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ohttp_max_response_bytes: Option<usize>,
 }
 
 /// Convert an Info configuration into public Relay Info
@@ -142,6 +146,8 @@ impl From<Settings> for RelayInfo {
             icon: i.relay_icon,
             rest_capable: Some(c.options.enable_rest),
             ohttp_capable: Some(c.options.enable_ohttp),
+            ohttp_max_request_bytes: Some(c.ohttp.max_request_bytes),
+            ohttp_max_response_bytes: Some(c.ohttp.max_response_bytes),
         }
     }
 }
