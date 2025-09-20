@@ -277,9 +277,19 @@ async fn handle_web_request(
                 let http_req = http_req_builder
                     .body(Body::from(req.content().to_vec()))
                     .unwrap();
-                match handle_request(http_req, repo, event_tx).await {
+                match handle_request(http_req, repo, event_tx, &settings).await {
                     Ok(response) => {
                         let res = server_response.encapsulate(response.as_bytes()).unwrap();
+                        if res.len() > settings.ohttp.max_response_bytes {
+                            return Ok(Response::builder()
+                                .status(StatusCode::UNPROCESSABLE_ENTITY)
+                                .body(Body::from(format!(
+                                    "Response too large, max: {}, got: {}",
+                                    settings.ohttp.max_response_bytes,
+                                    res.len()
+                                )))
+                                .unwrap());
+                        }
                         return Ok(Response::builder()
                             .status(StatusCode::OK)
                             .body(Body::from(res))
@@ -310,7 +320,7 @@ async fn handle_web_request(
                     .unwrap());
             }
 
-            match handle_request(request, repo, event_tx).await {
+            match handle_request(request, repo, event_tx, &settings).await {
                 Ok(response) => Ok(Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::from(response))

@@ -5,6 +5,7 @@ use hyper::{body::to_bytes, Body, Method, Request};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    config::Settings,
     db::{self, SubmittedEvent},
     event::EventWrapper,
     notice::Notice,
@@ -33,6 +34,7 @@ pub(crate) async fn handle_request(
     request: Request<Body>,
     repo: Arc<dyn NostrRepo>,
     event_tx: mpsc::Sender<SubmittedEvent>,
+    config: &Settings,
 ) -> Result<String> {
     let method = request.method().clone();
     match method {
@@ -41,6 +43,13 @@ pub(crate) async fn handle_request(
             let message = query_params
                 .get("filter")
                 .ok_or(anyhow::anyhow!("Message not found"))?;
+            if message.len() > config.ohttp.max_request_bytes {
+                return Err(anyhow::anyhow!(
+                    "Message too large, max: {}, got: {}",
+                    config.ohttp.max_request_bytes,
+                    message.len()
+                ));
+            }
             let message_string = String::from_utf8(hex::decode(message)?)?;
             let nostr_message = convert_to_msg(&message_string, None)?;
             match nostr_message {
@@ -106,6 +115,13 @@ pub(crate) async fn handle_request(
         }
         Method::POST => {
             let body = to_bytes(request.into_body()).await?;
+            if body.len() > config.ohttp.max_request_bytes {
+                return Err(anyhow::anyhow!(
+                    "Request body too large, max: {}, got: {}",
+                    config.ohttp.max_request_bytes,
+                    body.len()
+                ));
+            }
             let body = String::from_utf8(body.to_vec())?;
             let nostr_message = convert_to_msg(&body, None)?;
 
