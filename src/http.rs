@@ -13,6 +13,8 @@ use crate::{
     server::{convert_to_msg, NostrMessage},
 };
 
+const ALLOWED_EVENT_TYPES: &[u64; 3] = &[17, 57, 1059];
+
 fn parse_query_params(query_string: &str) -> HashMap<String, String> {
     let mut params = HashMap::new();
 
@@ -144,6 +146,12 @@ pub(crate) async fn handle_request(
                                 user_agent: None,
                                 auth_pubkey: None,
                             };
+
+                            println!("======= Event kind: {:?}", e.kind);
+
+                            if !ALLOWED_EVENT_TYPES.contains(&e.kind) {
+                                return Err(anyhow::anyhow!("Event type not allowed"));
+                            }
 
                             // Send to database writer
                             if let Err(e) = event_tx.send(submit_event).await {
