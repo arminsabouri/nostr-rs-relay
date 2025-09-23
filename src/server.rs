@@ -220,24 +220,22 @@ async fn handle_web_request(
                 .body(Body::from("Please use a Nostr client to connect."))
                 .unwrap())
         }
-        // TODO: this is deprecated and should be replaced with GET /.well-known/ohttp-gateway
-        ("/ohttp-keys", false) => {
-            if let Some(ohttp_server_config) = ohttp_server_config {
-                let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
-
-                return Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from(ohttp_keys))
-                    .unwrap());
-            }
-
-            Ok(Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from(""))
-                .unwrap())
-        }
         ("/.well-known/ohttp-gateway", false) => {
             if let Some(ohttp_server_config) = ohttp_server_config {
+                if request.method() == http::Method::GET {
+                    let ohttp_keys = ohttp_server_config.server.config().encode().unwrap();
+
+                    return Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(Body::from(ohttp_keys))
+                        .unwrap());
+                }
+                if request.method() != http::Method::POST {
+                    return Ok(Response::builder()
+                        .status(StatusCode::METHOD_NOT_ALLOWED)
+                        .body(Body::from("Method not allowed"))
+                        .unwrap());
+                }
                 // Read the body as raw bytes to preserve exact client data
                 let mut req_body = Vec::new();
                 let mut body_stream = request.into_body();
