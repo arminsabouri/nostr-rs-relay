@@ -2,7 +2,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use hyper::{body::to_bytes, Body, Method, Request};
+use log::debug;
 use tokio::sync::{mpsc, oneshot};
+use tracing::error;
 
 use crate::{
     config::Settings,
@@ -13,6 +15,7 @@ use crate::{
     server::{convert_to_msg, NostrMessage},
 };
 
+/// Event types that are allowed to be sent or requested via OHTTP
 const ALLOWED_EVENT_TYPES: &[u64; 3] = &[17, 57, 1059];
 
 fn parse_query_params(query_string: &str) -> HashMap<String, String> {
@@ -56,7 +59,6 @@ pub(crate) async fn handle_request(
             let nostr_message = convert_to_msg(&message_string, None)?;
             match nostr_message {
                 NostrMessage::SubMsg(sub) => {
-                    println!("======= Subscription received via OHTTP: {:?}", sub.id);
                     // Create a channel for query results
                     let (query_tx, mut query_rx) = mpsc::channel::<db::QueryResult>(1000);
                     // Create a channel to abandon the query if needed
@@ -74,7 +76,7 @@ pub(crate) async fn handle_request(
                             )
                             .await
                         {
-                            eprintln!("OHTTP subscription query error: {:?}", e);
+                            error!("OHTTP subscription query error: {:?}", e);
                         }
                     });
                     let mut events = Vec::new();
@@ -102,8 +104,6 @@ pub(crate) async fn handle_request(
                             }
                         }
                     }
-                    println!("======= Events: {:?}", events);
-
                     // Join all events with newlines for the response
                     let response_data = events.join("\n");
                     return Ok(response_data.to_string());
@@ -130,7 +130,6 @@ pub(crate) async fn handle_request(
             // posting an event, expecting an event event
             match nostr_message {
                 NostrMessage::EventMsg(event_command) => {
-                    println!("======= Event received via OHTTP: {:?}", event_command);
                     let parsed: crate::error::Result<EventWrapper> = event_command.into();
                     match parsed {
                         Ok(EventWrapper::WrappedEvent(e)) => {
@@ -141,13 +140,11 @@ pub(crate) async fn handle_request(
                             let submit_event = SubmittedEvent {
                                 event: e.clone(),
                                 notice_tx,
-                                source_ip: "foo bar".to_string(),
+                                source_ip: "ohttp".to_string(),
                                 origin: None,
                                 user_agent: None,
                                 auth_pubkey: None,
                             };
-
-                            println!("======= Event kind: {:?}", e.kind);
 
                             if !ALLOWED_EVENT_TYPES.contains(&e.kind) {
                                 return Err(anyhow::anyhow!("Event type not allowed"));
@@ -155,24 +152,16 @@ pub(crate) async fn handle_request(
 
                             // Send to database writer
                             if let Err(e) = event_tx.send(submit_event).await {
-                                println!("======= Failed to send event to database: {:?}", e);
+                                return Err(anyhow::anyhow!("Failed to send event to database: {:?}", e));
                             }
 
                             // Wait for processing result and log any notices
                             if let Some(notice) = notice_rx.recv().await {
                                 match notice {
                                     Notice::Message(msg) => {
-                                        println!("======= Event processing message: {}", msg)
+                                        debug!("======= Event processing message: {}", msg)
                                     }
-                                    Notice::EventResult(result) => println!(
-                                        "======= Event processing result: {} - {}",
-                                        result.status.prefix(),
-                                        result.msg
-                                    ),
-                                    Notice::AuthChallenge(challenge) => println!(
-                                        "======= Event processing auth challenge: {}",
-                                        challenge
-                                    ),
+                                    _ => {}
                                 }
                                 return Ok(String::new());
                             } else {

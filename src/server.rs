@@ -259,7 +259,7 @@ async fn handle_web_request(
                     match ohttp_server_config.server.decapsulate(&req_body) {
                         Ok(result) => result,
                         Err(e) => {
-                            println!("======= OHTTP decapsulation failed: {:?}", e);
+                            error!("======= OHTTP decapsulation failed: {:?}", e);
                             return Ok(Response::builder()
                                 .status(StatusCode::BAD_REQUEST)
                                 .body(Body::from(format!("OHTTP decapsulation failed: {:?}", e)))
