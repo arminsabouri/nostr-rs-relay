@@ -34,6 +34,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{
     header, server::conn::AddrStream, upgrade, Body, Request, Response, Server, StatusCode,
 };
+use nostr::hashes::hex::ToHex;
 use nostr::key::FromPkStr;
 use nostr::key::Keys;
 use prometheus::IntCounterVec;
@@ -178,7 +179,17 @@ async fn handle_web_request(
                     if mt_str.contains("application/nostr+json") {
                         // build a relay info response
                         debug!("Responding to server info request");
-                        let rinfo = RelayInfo::from(settings);
+                        let mut rinfo = RelayInfo::from(settings);
+                        if let Some(ohttp_key_config) = ohttp_server_config {
+                            rinfo.ohttp_key_config = Some(
+                                ohttp_key_config
+                                    .server
+                                    .config()
+                                    .encode()
+                                    .expect("Keys generated on startup and should be valid")
+                                    .to_hex(),
+                            );
+                        }
                         let b = Body::from(serde_json::to_string_pretty(&rinfo).unwrap());
                         return Ok(Response::builder()
                             .status(200)

@@ -69,6 +69,8 @@ pub struct RelayInfo {
     pub ohttp_max_request_bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ohttp_max_response_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ohttp_key_config: Option<String>,
 }
 
 /// Convert an Info configuration into public Relay Info
@@ -148,6 +150,7 @@ impl From<Settings> for RelayInfo {
             ohttp_capable: Some(c.options.enable_ohttp),
             ohttp_max_request_bytes: Some(c.ohttp.max_request_bytes),
             ohttp_max_response_bytes: Some(c.ohttp.max_response_bytes),
+            ohttp_key_config: c.ohttp.key_config,
         }
     }
 }

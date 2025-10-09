@@ -58,6 +58,8 @@ pub struct Options {
 pub struct Ohttp {
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
+    /// hex encoded key config
+    pub key_config: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,6 +380,7 @@ impl Default for Settings {
             ohttp: Ohttp {
                 max_request_bytes: 65536,
                 max_response_bytes: 65536,
+                key_config: None,
             },
         }
     }
